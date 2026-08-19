@@ -161,6 +161,23 @@ solo en Google Drive; el repo es solo el código.
 7. (Opcional, cuando llegues ahí) `src/sam_baseline.py` — comparación contra
    Segment Anything como "herramienta actual" además de los métodos clásicos.
 
+## Decisiones de preprocesamiento (justificación para la tesis)
+
+Cada vez que se evalúa si un paso de preprocesamiento entra o no al pipeline,
+el resultado se guarda en `outputs/preprocessing_decisions/` (CSV con el
+detalle por imagen + un `.md` con método, tabla de resultados y conclusión),
+para poder citarlo directamente al redactar la tesis en vez de tener que
+reconstruir el análisis de memoria.
+
+- `clahe_decision.md` — CLAHE sobre el canal L (LAB) para normalizar
+  iluminación despareja. Resultado sobre 25 imágenes reales: no mejora la
+  separación herida/piel de forma significativa en L, y empeora de forma
+  significativa (p=0.0001) la separación en el canal a (rojo-verde), que es
+  el canal más informativo del dataset. **Decisión: no se incorpora al
+  pipeline de entrenamiento.** Correr `src/evaluate_preprocessing_effect.py`
+  sobre más imágenes (o sobre las 739 completas) si se quiere una conclusión
+  más robusta antes de la redacción final.
+
 ## Notas honestas sobre el estado actual del código
 
 - `estimate_foreground_mask` en `preprocessing.py` (aislar al animal del
