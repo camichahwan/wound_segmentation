@@ -1,0 +1,7 @@
+# Dependencias opcionales, solo necesarias para partes específicas del proyecto.
+# Instalar por separado cuando llegues a esa parte, no hace falta desde el arranque.
+
+# Para sam_baseline.py (Idea 4 del documento de ideas de tesis: benchmark de
+# foundation models). Además del paquete, hay que descargar un checkpoint
+# manualmente -- ver las instrucciones dentro de sam_baseline.py.
+segment-anything

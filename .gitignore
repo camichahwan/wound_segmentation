@@ -1,0 +1,30 @@
+# Datos: viven en Google Drive, NO en GitHub (son ~1000 fotos en alta resolución,
+# no tiene sentido versionarlas y probablemente violarías límites de tamaño de GitHub).
+data/raw_images/
+data/raw_masks/
+data/samples_root/
+
+# Sí se versiona data/samples/ (dos archivos chicos) para que cualquiera pueda
+# clonar el repo y correr demo_preprocessing.py sin tocar Drive.
+
+# Checkpoints entrenados y resultados: pesados, y se regeneran corriendo el código.
+outputs/checkpoints/*.pt
+outputs/checkpoints/*.pth
+outputs/*.csv
+outputs/figures/*.png
+
+# Mantener las carpetas en git aunque estén vacías
+!outputs/checkpoints/.gitkeep
+!outputs/figures/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
+venv/
+
+# Sistema
+.DS_Store
+Thumbs.db
