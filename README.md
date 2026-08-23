@@ -28,6 +28,9 @@ wound_segmentation/
 │   └── evaluate.py                    <- compara checkpoints entrenados sobre el set de test
 ├── notebooks/
 │   └── colab_starter.ipynb           <- notebook listo para correr todo en Colab
+├── tools/
+│   └── segment_app.py                 <- app Streamlit para segmentar heridas a mano (dibujar
+│                                          contorno -> se rellena solo -> guarda máscara en Drive)
 ├── outputs/
 │   └── preprocessing_decisions/      <- justificación citable de cada decisión de preprocesamiento
 ├── requirements.txt
@@ -97,6 +100,29 @@ python dataset.py
 Debería imprimir cuántas imágenes tenés con máscara y cuántas sin ella. Si
 tira error de que no encuentra la carpeta, revisar `DRIVE_LOCAL_WINDOWS_PATH`
 en `src/config.py` (puede que tu letra de unidad de Drive no sea `G:`).
+
+## Herramienta de segmentación manual (`tools/segment_app.py`)
+
+App local en Streamlit para ir generando las máscaras que todavía faltan
+(las imágenes sin par en `Masks/`). Se corre aparte del resto del pipeline,
+no necesita PyTorch:
+
+```powershell
+cd tools
+pip install streamlit streamlit-drawable-canvas pillow opencv-python numpy
+streamlit run segment_app.py
+```
+
+Abre el navegador en `localhost:8501`, muestra directo la primera imagen sin
+máscara (salteando las que ya están hechas), y funciona así: se traza a mano
+alzada el contorno de la herida y, al guardar, la app rellena sola el
+interior del contorno cerrado y lo guarda como `Masks/<nombre>_mask.png` —
+mismo formato y convención de nombre que ya usa `dataset.py`, así que las
+máscaras nuevas se integran solas al dataset sin tocar nada más.
+
+**Importante:** el trazo tiene que quedar cerrado (el punto final cerca del
+inicial) para que el relleno automático funcione bien — si el contorno queda
+abierto, no se detecta un interior para rellenar.
 
 ## Decisiones de preprocesamiento (justificación para la tesis)
 
