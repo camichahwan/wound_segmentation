@@ -21,6 +21,7 @@ import pandas as pd
 import torch
 import cv2
 
+from config import get_checkpoints_dir
 from dataset import list_paired_and_unpaired, train_val_test_split
 from models.unet_scratch import UNetFromScratch
 from models.unet_pretrained import build_pretrained_unet
@@ -96,12 +97,16 @@ def main():
 
     df = pd.DataFrame(all_rows)
 
-    summary = df.groupby("model").agg(["mean", "std"])
+    # Ojo: "model" e "image" son texto, no columnas de métricas -- si se las deja
+    # adentro, versiones nuevas de pandas tiran TypeError al intentar promediarlas
+    # (versiones viejas las ignoraban solas). Se seleccionan a mano las columnas
+    # numéricas antes de agregar.
+    metric_cols = [c for c in df.columns if c not in ("model", "image")]
+    summary = df.groupby("model")[metric_cols].agg(["mean", "std"])
     print("\n=== Resumen por modelo (promedio ± desvío estándar sobre el set de test) ===")
     print(summary)
 
-    out_csv = args.out_csv or os.path.join(
-        os.path.dirname(__file__), "..", "outputs", "evaluation_results.csv")
+    out_csv = args.out_csv or os.path.join(get_checkpoints_dir(), "evaluation_results.csv")
     df.to_csv(out_csv, index=False)
     print(f"\nResultados por imagen guardados en: {out_csv}")
 

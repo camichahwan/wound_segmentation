@@ -62,6 +62,29 @@ def get_masks_dir() -> str:
     return os.path.join(get_data_root(), "Masks")
 
 
+CHECKPOINTS_SUBDIR = "model_checkpoints"
+
+
+def get_checkpoints_dir() -> str:
+    """
+    Dónde se guardan los checkpoints entrenados (.pt) y su historial (.csv).
+
+    En Colab esto TIENE que vivir en Drive, no en /content (disco temporal de
+    la VM: se borra si se desconecta la sesión o Colab recicla el entorno de
+    ejecución -- ya perdimos un entrenamiento completo de 40+80 épocas por
+    guardarlo solo ahí). Localmente se mantiene relativo al repo, como antes,
+    porque ahí el disco no es efímero.
+    """
+    env_override = os.environ.get("WOUND_CHECKPOINTS_DIR")
+    if env_override:
+        return env_override
+
+    if _running_in_colab():
+        return os.path.join(get_data_root(), CHECKPOINTS_SUBDIR)
+
+    return os.path.join(os.path.dirname(__file__), "..", "outputs", "checkpoints")
+
+
 def mount_drive_if_colab():
     """
     Llamar esto al principio de cualquier notebook/script en Colab, antes de
@@ -78,3 +101,4 @@ if __name__ == "__main__":
     print("Data root:", get_data_root())
     print("Images dir:", get_images_dir())
     print("Masks dir:", get_masks_dir())
+    print("Checkpoints dir:", get_checkpoints_dir())

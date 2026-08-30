@@ -101,6 +101,23 @@ Debería imprimir cuántas imágenes tenés con máscara y cuántas sin ella. Si
 tira error de que no encuentra la carpeta, revisar `DRIVE_LOCAL_WINDOWS_PATH`
 en `src/config.py` (puede que tu letra de unidad de Drive no sea `G:`).
 
+## Dónde se guardan los checkpoints entrenados (importante)
+
+`train.py` guarda los checkpoints (`.pt`) y el historial (`.csv`) usando
+`config.get_checkpoints_dir()`:
+
+- **En Colab: dentro de Google Drive** (`Tesis Imagenes/model_checkpoints/`),
+  nunca en `/content`. Esto se corrigió después de perder por un rato el
+  acceso a un entrenamiento completo (pretrained 40 épocas + scratch 80
+  épocas) que se había guardado solo en `/content`, disco temporal de la VM
+  de Colab que se borra si se desconecta la sesión o Colab recicla el
+  entorno de ejecución.
+- **Local (VS Code): sigue relativo al repo** (`outputs/checkpoints/`), como
+  antes, porque ahí el disco no es efímero.
+
+Si alguna vez hace falta forzar otra ubicación, se puede setear la variable
+de entorno `WOUND_CHECKPOINTS_DIR`.
+
 ## Herramienta de segmentación manual (`tools/segment_app.py`)
 
 App local en Streamlit para ir generando las máscaras que todavía faltan

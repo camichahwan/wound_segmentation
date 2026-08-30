@@ -26,6 +26,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from config import get_checkpoints_dir
 from dataset import list_paired_and_unpaired, train_val_test_split, WoundSegmentationDataset
 from models.unet_scratch import UNetFromScratch
 from models.unet_pretrained import build_pretrained_unet
@@ -130,8 +131,9 @@ def main():
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=5)
 
     run_name = args.run_name or f"unet_{args.model}"
-    ckpt_dir = os.path.join(os.path.dirname(__file__), "..", "outputs", "checkpoints")
+    ckpt_dir = get_checkpoints_dir()
     os.makedirs(ckpt_dir, exist_ok=True)
+    print(f"Los checkpoints y el historial de esta corrida se guardan en: {ckpt_dir}")
     ckpt_path = os.path.join(ckpt_dir, f"{run_name}.pt")
     history_path = os.path.join(ckpt_dir, f"{run_name}_history.csv")
 
