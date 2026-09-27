@@ -24,8 +24,13 @@ wound_segmentation/
 │   ├── models/
 │   │   ├── unet_scratch.py            <- U-Net implementada desde cero
 │   │   └── unet_pretrained.py         <- U-Net con encoder preentrenado (segmentation_models_pytorch)
-│   ├── train.py                       <- entrena cualquiera de los dos modelos
-│   └── evaluate.py                    <- compara checkpoints entrenados sobre el set de test
+│   ├── train.py                       <- entrena cualquiera de los dos modelos (o hace fine-tuning
+│   │                                     de un checkpoint existente, con --init_checkpoint)
+│   ├── evaluate.py                    <- compara checkpoints entrenados sobre el set de test
+│   ├── postprocess_and_ensemble.py    <- post-procesamiento + ensemble sobre checkpoints ya entrenados
+│   ├── roi_utils.py                   <- calculo compartido de la region de recorte (dos etapas)
+│   ├── make_crop_dataset.py           <- genera el dataset de recortes para la etapa 2
+│   └── evaluate_two_stage.py          <- evaluacion de punta a punta del enfoque en dos etapas
 ├── notebooks/
 │   └── colab_starter.ipynb           <- notebook listo para correr todo en Colab
 ├── tools/
@@ -159,19 +164,99 @@ reconstruir el análisis de memoria.
   completas) si se quiere una conclusión más robusta antes de la redacción
   final.
 
+## Análisis de errores (resultados del entrenamiento, justificación para la tesis)
+
+Después de comparar `unet_pretrained` vs. `unet_scratch` sobre el set de test
+(110 imágenes, resultados en `Drive/model_checkpoints/evaluation_results.csv`),
+cada hallazgo relevante se documenta en `outputs/error_analysis/`:
+
+- `heridas_chicas_resize.md` — las 4 imágenes donde ambos modelos fallan más
+  fuerte resultaron ser heridas chicas/tempranas (hasta 0.015% de la imagen)
+  que el resize fijo a 512x512 reduce a ~6x6 píxeles, por debajo de lo que la
+  red puede segmentar. No son máscaras mal hechas ni casos a descartar --
+  son justo el tipo de caso (herida en estadio inicial) que el anteproyecto
+  plantea como motivación. Decisión: mantenerlas en el dataset, documentar la
+  limitación, y atacarla con un enfoque en dos etapas (localización gruesa +
+  recorte + segmentación fina) en vez de con cambios de loss function.
+
+## Mejorar resultados sin reentrenar (`src/postprocess_and_ensemble.py`)
+
+Evalúa, sobre los checkpoints ya entrenados y con la misma metodología de
+evidencia (Wilcoxon pareado por imagen) que el resto del repo, si conviene
+sumar:
+
+- **Post-procesamiento**: cierre morfológico + quedarse con el componente
+  conectado más grande (elimina blobs falsos positivos sueltos, que son los
+  que más inflan el Hausdorff distance).
+- **Ensemble**: promediar las probabilidades de `unet_pretrained` +
+  `unet_scratch` antes de binarizar.
+
+No ataca el hallazgo de `outputs/error_analysis/heridas_chicas_resize.md`
+(eso es pérdida de información en el resize, no algo que postprocesamiento
+o ensemble puedan arreglar) — apunta a las demás fallas: bordes ruidosos,
+blobs sueltos, casos donde un modelo se equivoca y el otro no.
+
+```
+python src/postprocess_and_ensemble.py
+```
+
+Guarda `postprocess_ensemble_results.csv` y `postprocess_ensemble_decision.md`
+en la misma carpeta de Drive que los checkpoints.
+
+## Enfoque en dos etapas (heridas chicas/tempranas)
+
+Ataca el hallazgo de `outputs/error_analysis/heridas_chicas_resize.md`: el
+resize fijo a 512x512 destruye la información de las heridas más chicas
+(~6x6 px después del resize). En vez de cambiar la resolución de todo el
+pipeline (caro en memoria/tiempo), se agrega una segunda etapa:
+
+1. **Etapa 1 (localización gruesa)**: `unet_pretrained`, pero entrenado a
+   1024x1024 en vez de 512x512 (`--run_name unet_localizer_1024`), para que
+   pueda detectar aunque sea aproximadamente heridas chicas que a 512 ya
+   desaparecen. Da una máscara aproximada, no el contorno final.
+2. **Generar recortes de entrenamiento** (`make_crop_dataset.py`): a partir
+   de la máscara REAL de cada imagen de train, recorta la región alrededor
+   de la herida (con margen + aleatoriedad, `roi_utils.py`) y guarda el
+   resultado en una carpeta nueva de Drive (`Tesis Imagenes Crops/`,
+   hermana de `Tesis Imagenes/`). Como los nombres de archivo no cambian,
+   el split train/val/test es exactamente el mismo que en el dataset
+   original (misma seed).
+3. **Etapa 2 (segmentación fina)**: fine-tuning de `unet_pretrained` (no
+   parte de cero, parte de los pesos ya entrenados con `--init_checkpoint`)
+   sobre esos recortes a 512x512 -- ahora la herida ocupa una fracción
+   mucho más grande de la imagen que le llega a la red.
+4. **Evaluación de punta a punta** (`evaluate_two_stage.py`): sobre las
+   imágenes de test ORIGINALES completas (no los recortes), corre la etapa
+   1 para localizar, recorta la imagen real con esa predicción (no con la
+   máscara real -- así es honesto), corre la etapa 2 sobre el recorte, y
+   compara el resultado final contra `unet_pretrained` solo con test
+   pareado de Wilcoxon. Reporta también especialmente cómo le va en las 4
+   imágenes de heridas chicas ya documentadas.
+
+Las celdas correspondientes están en `colab_starter.ipynb` (después de la
+celda 8, marcadas "Enfoque en dos etapas"). Tiempo estimado adicional:
+~3-4hs para la etapa 1 a 1024px, ~1h para la etapa 2, ~20min para la
+evaluación final -- bastante más que las corridas anteriores, tenerlo en
+cuenta para planificar la sesión de Colab (los checkpoints se siguen
+guardando en Drive automáticamente a medida que mejoran, así que un corte
+de sesión no hace perder todo el progreso).
+
 ## Orden sugerido de trabajo desde acá
 
-1. Confirmar en Colab que `train.py` corre de punta a punta con pocas épocas
-   (chequeo de que no hay errores de código, antes de un entrenamiento largo).
-2. `python src/train.py --model pretrained --encoder resnet34 --epochs 40` —
-   primer modelo entrenable.
-3. `python src/train.py --model scratch --epochs 80` — la U-Net desde cero
-   que pidió tu tutor, para comparar contra la anterior.
-4. `python src/evaluate.py --checkpoints ...` — tabla comparativa final entre
-   los dos modelos, sobre el mismo set de test.
-5. Más adelante: baselines clásicos y comparación contra herramientas
-   actuales (SAM) como punto de comparación adicional — todavía no están
-   implementados en este repo, se agregan cuando lleguemos a esa parte.
+1. ~~Confirmar en Colab que `train.py` corre de punta a punta~~ — hecho.
+2. ~~Entrenar `unet_pretrained` (40 épocas) y `unet_scratch` (80 épocas),
+   comparar con `evaluate.py`~~ — hecho, ver
+   `outputs/error_analysis/heridas_chicas_resize.md` para el resultado y el
+   hallazgo de heridas chicas.
+3. `python src/postprocess_and_ensemble.py` — post-procesamiento + ensemble
+   sobre lo ya entrenado, sin reentrenar (celda 8 del notebook).
+4. Enfoque en dos etapas para heridas chicas (celdas 9 a 12 del notebook,
+   ver sección de arriba): entrenar localizador a 1024px, generar recortes,
+   fine-tuning de la etapa 2, evaluación de punta a punta.
+5. Más adelante: baselines clásicos (región growing y los más usados para
+   este tipo de segmentación) y comparación contra herramientas actuales
+   (SAM) — todavía no están implementados en este repo, se agregan cuando
+   lleguemos a esa parte.
 
 ## Notas honestas sobre el estado actual del código
 
@@ -182,3 +267,12 @@ reconstruir el análisis de memoria.
   escribieron y revisaron a mano en un entorno sin GPU) — el primer paso en
   Colab debería ser correr unas pocas épocas de prueba para confirmar que no
   hay ningún error de forma/dimensión antes de lanzar un entrenamiento largo.
+- **El enfoque en dos etapas (`roi_utils.py`, `make_crop_dataset.py`,
+  `evaluate_two_stage.py`, y el flag `--init_checkpoint` de `train.py`) está
+  escrito y revisado a mano (compila, sin errores de sintaxis) pero
+  TODAVÍA NO SE CORRIÓ de punta a punta con GPU real.** Es código nuevo y
+  más complejo que el resto del repo (recorte, coordenadas, pegado de
+  vuelta a la imagen completa) — corrida la primera vez, revisar con
+  atención que los números den razonables (por ejemplo, que el `n_stage1_empty`
+  que imprime `evaluate_two_stage.py` no sea sospechosamente alto) antes de
+  asumir que el resultado es correcto.

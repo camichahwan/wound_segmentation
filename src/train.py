@@ -105,6 +105,11 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run_name", default=None)
     parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--init_checkpoint", default=None,
+                         help="Ruta a un .pt de una corrida anterior para arrancar desde esos pesos "
+                              "en vez de inicializacion aleatoria/ImageNet (fine-tuning). Util para "
+                              "la etapa 2 del enfoque en dos etapas: partir de unet_pretrained.pt ya "
+                              "entrenado sobre imagenes completas, y afinarlo sobre recortes.")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -127,6 +132,10 @@ def main():
                              num_workers=args.num_workers)
 
     model = build_model(args).to(device)
+    if args.init_checkpoint:
+        print(f"Fine-tuning: cargando pesos iniciales desde {args.init_checkpoint}")
+        init_ckpt = torch.load(args.init_checkpoint, map_location=device)
+        model.load_state_dict(init_ckpt["model_state_dict"])
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=5)
 

@@ -85,6 +85,16 @@ def get_checkpoints_dir() -> str:
     return os.path.join(os.path.dirname(__file__), "..", "outputs", "checkpoints")
 
 
+def get_crops_data_root() -> str:
+    """
+    Raiz del dataset de RECORTES para la etapa 2 del enfoque en dos etapas
+    (ver outputs/error_analysis/heridas_chicas_resize.md). La genera
+    make_crop_dataset.py, como carpeta hermana de "Tesis Imagenes" (mismo
+    nivel, para que quede en Drive tambien y sea persistente).
+    """
+    return os.path.join(os.path.dirname(get_data_root()), "Tesis Imagenes Crops")
+
+
 def mount_drive_if_colab():
     """
     Llamar esto al principio de cualquier notebook/script en Colab, antes de
