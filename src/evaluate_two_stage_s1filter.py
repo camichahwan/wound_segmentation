@@ -83,6 +83,11 @@ def main():
     parser.add_argument("--stage2_checkpoint", required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out_dir", default=None)
+    parser.add_argument("--split", choices=["val", "test"], default="test",
+                         help="Sobre que split evaluar. Para TOMAR DECISIONES usar val; el test se "
+                              "reserva para el numero final de la tesis.")
+    parser.add_argument("--tag", default="",
+                         help="Sufijo para los archivos de salida (ej. 'val_ftv') para no pisar corridas.")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -95,8 +100,11 @@ def main():
     stage2_model, stage2_args = load_model(args.stage2_checkpoint, device)
 
     paired, _ = list_paired_and_unpaired()
-    _, _, test_samples = train_val_test_split(paired, seed=args.seed)
-    print(f"Evaluando {len(test_samples)} imagenes de test.")
+    _, val_samples, test_samples = train_val_test_split(paired, seed=args.seed)
+    if args.split == "val":
+        test_samples = val_samples
+    suffix = f"_{args.tag}" if args.tag else (f"_{args.split}" if args.split != "test" else "")
+    print(f"Evaluando {len(test_samples)} imagenes del split '{args.split}'.")
 
     rows, changed_images = [], []
     for i, sample in enumerate(test_samples):
@@ -119,7 +127,7 @@ def main():
             print(f"  ... {i + 1}/{len(test_samples)} imagenes procesadas")
 
     df = pd.DataFrame(rows)
-    df.to_csv(os.path.join(out_dir, "two_stage_s1filter_results.csv"), index=False)
+    df.to_csv(os.path.join(out_dir, f"two_stage_s1filter_results{suffix}.csv"), index=False)
 
     get = lambda v: df[df.variant == v].set_index("image").sort_index()
     base, ts, tsf = get("pretrained_baseline"), get("two_stage"), get("two_stage_s1filter")
@@ -127,7 +135,7 @@ def main():
     print(f"\nImagenes donde el filtro cambio la mascara de la etapa 1: {len(changed_images)}/{len(test_samples)}")
     print("  ->", changed_images)
 
-    lines = ["# Dos etapas + filtro de componente mayor en la etapa 1", "",
+    lines = [f"# Dos etapas + filtro de componente mayor en la etapa 1 (split: {args.split}, etapa 2: {os.path.basename(args.stage2_checkpoint)})", "",
              f"Imagenes donde el filtro cambio la mascara de la etapa 1: {len(changed_images)}/{len(test_samples)} "
              f"({', '.join(changed_images) if changed_images else 'ninguna'}).", ""]
     header = ["| Métrica | Media base | Media var. | Mediana base | Mediana var. | mejoran/empeoran/igual | p (Wilcoxon) | Veredicto |",
@@ -152,7 +160,7 @@ def main():
             lines.append(f"| {n} | {base.loc[n,'dice']:.3f} | {ts.loc[n,'dice']:.3f} | {tsf.loc[n,'dice']:.3f} | "
                          f"{base.loc[n,'hausdorff_px']:.1f} | {ts.loc[n,'hausdorff_px']:.1f} | {tsf.loc[n,'hausdorff_px']:.1f} |")
 
-    report = os.path.join(out_dir, "two_stage_s1filter_decision.md")
+    report = os.path.join(out_dir, f"two_stage_s1filter_decision{suffix}.md")
     with open(report, "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"\nReporte guardado en: {report}")

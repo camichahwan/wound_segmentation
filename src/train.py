@@ -23,8 +23,9 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 import numpy as np
+import cv2
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from config import get_checkpoints_dir
 from dataset import list_paired_and_unpaired, train_val_test_split, WoundSegmentationDataset
@@ -49,6 +50,56 @@ def combined_loss(logits, targets, bce_weight: float = 0.5):
     return bce_weight * bce + (1 - bce_weight) * dsc
 
 
+def focal_tversky_loss(logits, targets, alpha: float = 0.7, beta: float = 0.3,
+                        gamma: float = 0.75, eps: float = 1e-7):
+    """
+    Focal Tversky (Abraham & Khan, ISBI 2019), pensada para estructuras chicas /
+    desbalance fuerte: alpha > beta penaliza mas los falsos NEGATIVOS (herida
+    que el modelo no marca) que los falsos positivos, y gamma < 1 (aca 0.75 =
+    1/(4/3), el valor del paper) hace que el gradiente siga siendo grande en
+    los casos dificiles (mal segmentados) en vez de apagarse. Se calcula por
+    imagen y se promedia, para que una herida chica pese igual que una grande.
+    """
+    probs = torch.sigmoid(logits).view(logits.size(0), -1)
+    t = targets.view(targets.size(0), -1)
+    tp = (probs * t).sum(dim=1)
+    fn = ((1 - probs) * t).sum(dim=1)
+    fp = (probs * (1 - t)).sum(dim=1)
+    tversky = (tp + eps) / (tp + alpha * fn + beta * fp + eps)
+    return ((1 - tversky) ** gamma).mean()
+
+
+LOSS_NAME = "bce_dice"  # se fija en main() segun --loss
+
+
+def combined_loss_dispatch(logits, targets):
+    """Loss que usa run_epoch. Default bce_dice = comportamiento original."""
+    if LOSS_NAME == "bce_dice":
+        return combined_loss(logits, targets)
+    bce = torch.nn.functional.binary_cross_entropy_with_logits(logits, targets)
+    if LOSS_NAME == "focal_tversky":
+        return focal_tversky_loss(logits, targets)
+    if LOSS_NAME == "bce_focal_tversky":
+        return 0.5 * bce + 0.5 * focal_tversky_loss(logits, targets)
+    raise ValueError(f"Loss desconocida: {LOSS_NAME}")
+
+
+def small_wound_weights(samples, power: float = 0.5, max_ratio: float = 8.0):
+    """
+    Peso de muestreo por imagen = (1/fraccion de herida)^power, normalizado y
+    acotado a max_ratio veces el peso minimo (para que 1-2 heridas
+    minusculas no dominen el entrenamiento). Con power=0.5 una herida 4 veces
+    mas chica se muestrea ~2 veces mas seguido.
+    """
+    fracs = []
+    for sample in samples:
+        mask = cv2.imread(sample.mask_path, cv2.IMREAD_GRAYSCALE)
+        fracs.append(max(float((mask > 127).mean()), 1e-6))
+    w = np.array(fracs) ** (-power)
+    w = w / w.min()
+    return np.minimum(w, max_ratio)
+
+
 def run_epoch(model, loader, optimizer, device, train: bool):
     model.train() if train else model.eval()
     total_loss, total_dice, total_iou, n_batches = 0.0, 0.0, 0.0, 0
@@ -62,7 +113,7 @@ def run_epoch(model, loader, optimizer, device, train: bool):
                 optimizer.zero_grad()
 
             logits = model(images)
-            loss = combined_loss(logits, masks)
+            loss = combined_loss_dispatch(logits, masks)
 
             if train:
                 loss.backward()
@@ -105,6 +156,13 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run_name", default=None)
     parser.add_argument("--num_workers", type=int, default=2)
+    parser.add_argument("--loss", choices=["bce_dice", "focal_tversky", "bce_focal_tversky"],
+                         default="bce_dice",
+                         help="bce_dice = comportamiento original. focal_tversky / bce_focal_tversky "
+                              "priorizan no perder heridas chicas (ver focal_tversky_loss).")
+    parser.add_argument("--oversample_small", action="store_true",
+                         help="Muestrear con mas frecuencia las imagenes con herida chica "
+                              "(ver small_wound_weights). Solo afecta al set de train.")
     parser.add_argument("--init_checkpoint", default=None,
                          help="Ruta a un .pt de una corrida anterior para arrancar desde esos pesos "
                               "en vez de inicializacion aleatoria/ImageNet (fine-tuning). Util para "
@@ -126,8 +184,19 @@ def main():
     train_ds = WoundSegmentationDataset(train_samples, image_size=args.image_size, augment=True)
     val_ds = WoundSegmentationDataset(val_samples, image_size=args.image_size, augment=False)
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                               num_workers=args.num_workers, drop_last=True)
+    global LOSS_NAME
+    LOSS_NAME = args.loss
+    print(f"Loss: {LOSS_NAME} | oversample_small: {args.oversample_small}")
+
+    if args.oversample_small:
+        weights = small_wound_weights(train_samples)
+        print(f"Pesos de muestreo (min/mediana/max): {weights.min():.2f}/{np.median(weights):.2f}/{weights.max():.2f}")
+        sampler = WeightedRandomSampler(weights.tolist(), num_samples=len(train_samples), replacement=True)
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, sampler=sampler,
+                                   num_workers=args.num_workers, drop_last=True)
+    else:
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                                   num_workers=args.num_workers, drop_last=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
                              num_workers=args.num_workers)
 

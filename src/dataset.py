@@ -79,17 +79,56 @@ def list_paired_and_unpaired(images_dir: str = None, masks_dir: str = None
     return paired, unpaired
 
 
+DEFAULT_SPLIT_MANIFEST = os.path.join(os.path.dirname(__file__), "..", "splits", "split_v1.csv")
+
+
+def _split_from_manifest(paired: List[PairedSample], manifest_path: str):
+    """
+    Split CONGELADO (splits/split_v1.csv, versionado en git): cada imagen ya
+    anotada cuando se congeló conserva SIEMPRE su asignacion train/val/test,
+    aunque despues se sumen mas imagenes anotadas. Las imagenes nuevas (que
+    no estan en el manifiesto) van a train -- asi el set de test queda fijo y
+    ningun modelo entrenado antes ve en train imagenes que hoy estarian en
+    test. Sin esto, cada vez que se agregan mascaras el shuffle cambia y se
+    contamina la evaluacion.
+    """
+    import csv
+    with open(manifest_path, newline="") as f:
+        assignment = {row["image"]: row["split"] for row in csv.DictReader(f)}
+    train, val, test, n_new = [], [], [], 0
+    for sample in paired:
+        split = assignment.get(os.path.basename(sample.image_path))
+        if split is None:
+            n_new += 1
+            split = "train"
+        {"train": train, "val": val, "test": test}[split].append(sample)
+    if n_new:
+        print(f"[split] {n_new} imagenes anotadas despues de congelar el split -> se usan en TRAIN "
+              f"(val/test no cambian).")
+    return train, val, test
+
+
 def train_val_test_split(paired: List[PairedSample], val_frac: float = 0.15,
-                          test_frac: float = 0.15, seed: int = 42
+                          test_frac: float = 0.15, seed: int = 42,
+                          manifest_path: Optional[str] = "default"
                           ) -> Tuple[List[PairedSample], List[PairedSample], List[PairedSample]]:
     """
-    Split simple a nivel de imagen. OJO: si varias fotos del dataset
-    corresponden al mismo animal en distintos días (seguimiento longitudinal),
-    lo correcto es separar por ANIMAL, no por imagen suelta, para no filtrar
-    información del mismo sujeto entre train y test. Este split por imagen es
-    un punto de partida razonable mientras se define/confirma esa estructura;
-    conviene revisarlo antes de reportar resultados finales.
+    Si existe el manifiesto congelado (splits/split_v1.csv) se usa ese split
+    (ver _split_from_manifest) y val_frac/test_frac/seed se ignoran. Si no
+    existe, o se pasa manifest_path=None, cae al split aleatorio por seed.
+
+    OJO: si varias fotos del dataset corresponden al mismo animal en
+    distintos días (seguimiento longitudinal), lo correcto es separar por
+    ANIMAL, no por imagen suelta, para no filtrar información del mismo
+    sujeto entre train y test. Este split por imagen es un punto de partida
+    razonable mientras se define/confirma esa estructura; conviene revisarlo
+    antes de reportar resultados finales.
     """
+    if manifest_path == "default":
+        manifest_path = DEFAULT_SPLIT_MANIFEST
+    if manifest_path and os.path.exists(manifest_path):
+        return _split_from_manifest(paired, manifest_path)
+
     rng = random.Random(seed)
     shuffled = paired.copy()
     rng.shuffle(shuffled)
