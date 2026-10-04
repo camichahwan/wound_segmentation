@@ -67,18 +67,25 @@ def main():
     parser.add_argument("--n_worst", type=int, default=8,
                          help="Cuantos overlays de los peores casos guardar (ademas de las 2 fallas conocidas)")
     parser.add_argument("--out_dir", default=None)
+    parser.add_argument("--split", choices=["val", "test"], default="test")
+    parser.add_argument("--focus", nargs="*", default=None,
+                         help="Imagenes puntuales a incluir siempre en los overlays (default: las 2 fallas conocidas de test)")
     args = parser.parse_args()
+    focus = args.focus if args.focus is not None else KNOWN_FAILURES
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     out_dir = args.out_dir or get_checkpoints_dir()
-    overlay_dir = os.path.join(out_dir, "stage1_diagnostics_overlays")
+    tag = "" if args.split == "test" else f"_{args.split}"
+    overlay_dir = os.path.join(out_dir, f"stage1_diagnostics_overlays{tag}")
     os.makedirs(overlay_dir, exist_ok=True)
 
     model, model_args = load_model(args.stage1_checkpoint, device)
 
     paired, _ = list_paired_and_unpaired()
-    _, _, test_samples = train_val_test_split(paired, seed=args.seed)
-    print(f"Diagnosticando etapa 1 sobre {len(test_samples)} imagenes de test.")
+    _, val_samples, test_samples = train_val_test_split(paired, seed=args.seed)
+    if args.split == "val":
+        test_samples = val_samples
+    print(f"Diagnosticando etapa 1 sobre {len(test_samples)} imagenes del split '{args.split}'.")
 
     rows, cache = [], {}
     for i, sample in enumerate(test_samples):
@@ -116,7 +123,7 @@ def main():
             print(f"  ... {i + 1}/{len(test_samples)} imagenes procesadas")
 
     df = pd.DataFrame(rows).set_index("image")
-    csv_path = os.path.join(out_dir, "stage1_diagnostics.csv")
+    csv_path = os.path.join(out_dir, f"stage1_diagnostics{tag}.csv")
     df.to_csv(csv_path)
     print(f"\nDetalle por imagen guardado en: {csv_path}")
 
@@ -128,7 +135,7 @@ def main():
     print(f"\nRecortes que NO contienen entera la herida real: {n_miss}/{len(df)}")
 
     print("\n=== Las 2 fallas conocidas ===")
-    for name in KNOWN_FAILURES:
+    for name in focus:
         if name in df.index:
             print(name, df.loc[name].round(3).to_dict())
 
@@ -139,7 +146,7 @@ def main():
               f"crop={df.loc[name, 'crop_frac_img']:.2f} de la imagen | "
               f"contiene herida real={df.loc[name, 'crop_contains_gt_bbox']}")
 
-    for name in dict.fromkeys(KNOWN_FAILURES + worst):
+    for name in dict.fromkeys(focus + worst):
         if name in cache:
             image_bgr, gt_mask, s1_mask, region = cache[name]
             draw_overlay(image_bgr, gt_mask, s1_mask, region,
