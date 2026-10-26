@@ -154,14 +154,55 @@ except ImportError:
     _TorchDataset = object
 
 
+def random_zoom(img: np.ndarray, mask: np.ndarray, rng, min_scale: float = 0.35,
+                max_pad: float = 1.6, p_out: float = 0.3):
+    """Aumento de escala SOLO para entrenamiento. Devuelve (img, mask) con otra escala.
+
+    - Acercar (prob. 1 - p_out): recorta una ventana de lado entre `min_scale` y 1.0 del
+      tamaño original, ubicada al azar pero SIEMPRE conteniendo la herida completa.
+    - Alejar (prob. p_out): pega la imagen en un lienzo negro mas grande (hasta `max_pad`
+      veces) en una posicion al azar; la herida queda mas chica al reescalar.
+    Si la mascara esta vacia no se modifica nada.
+    """
+    H, W = mask.shape[:2]
+    ys, xs = np.where(mask > 0)
+    if len(ys) == 0:
+        return img, mask
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+
+    if rng.random() < p_out:
+        f = rng.uniform(1.1, max_pad)
+        nH, nW = int(H * f), int(W * f)
+        oy = int(rng.integers(0, nH - H + 1))
+        ox = int(rng.integers(0, nW - W + 1))
+        canvas = np.zeros((nH, nW) + img.shape[2:], dtype=img.dtype)
+        canvas_m = np.zeros((nH, nW), dtype=mask.dtype)
+        canvas[oy:oy + H, ox:ox + W] = img
+        canvas_m[oy:oy + H, ox:ox + W] = mask
+        return canvas, canvas_m
+
+    s_min = max((y1 - y0) / H, (x1 - x0) / W) * 1.1
+    s_min = min(1.0, max(min_scale, s_min))
+    s = rng.uniform(s_min, 1.0)
+    ch, cw = int(H * s), int(W * s)
+    lo_y, hi_y = max(0, y1 - ch), min(y0, H - ch)
+    lo_x, hi_x = max(0, x1 - cw), min(x0, W - cw)
+    if lo_y > hi_y or lo_x > hi_x:
+        return img, mask
+    ty = int(rng.integers(lo_y, hi_y + 1))
+    tx = int(rng.integers(lo_x, hi_x + 1))
+    return img[ty:ty + ch, tx:tx + cw], mask[ty:ty + ch, tx:tx + cw]
+
+
 class WoundSegmentationDataset(_TorchDataset):
     """Dataset de PyTorch para segmentación binaria herida/no-herida."""
 
     def __init__(self, samples: List[PairedSample], image_size: int = 512,
-                 augment: bool = False):
+                 augment: bool = False, zoom_prob: float = 0.0):
         self.samples = samples
         self.image_size = image_size
         self.augment = augment
+        self.zoom_prob = zoom_prob  # 0.0 = sin zoom aleatorio (comportamiento original)
         self.transform = self._build_transform()
 
     def _build_transform(self):
@@ -195,6 +236,11 @@ class WoundSegmentationDataset(_TorchDataset):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         mask = cv2.imread(sample.mask_path, cv2.IMREAD_GRAYSCALE)
         mask = (mask > 127).astype(np.float32)
+
+        if self.augment and self.zoom_prob > 0:
+            rng = np.random.default_rng()
+            if rng.random() < self.zoom_prob:
+                img, mask = random_zoom(img, mask, rng)
 
         transformed = self.transform(image=img, mask=mask)
         image_t = transformed["image"]

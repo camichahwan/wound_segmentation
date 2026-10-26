@@ -163,6 +163,10 @@ def main():
     parser.add_argument("--oversample_small", action="store_true",
                          help="Muestrear con mas frecuencia las imagenes con herida chica "
                               "(ver small_wound_weights). Solo afecta al set de train.")
+    parser.add_argument("--zoom_prob", type=float, default=0.0,
+                         help="Probabilidad (0-1) de aplicar zoom aleatorio a cada imagen de train "
+                              "(acerca o aleja, siempre con la herida completa dentro; ver random_zoom). "
+                              "0 = desactivado (comportamiento original).")
     parser.add_argument("--init_checkpoint", default=None,
                          help="Ruta a un .pt de una corrida anterior para arrancar desde esos pesos "
                               "en vez de inicializacion aleatoria/ImageNet (fine-tuning). Util para "
@@ -181,12 +185,13 @@ def main():
     train_samples, val_samples, test_samples = train_val_test_split(paired, seed=args.seed)
     print(f"Train: {len(train_samples)} | Val: {len(val_samples)} | Test: {len(test_samples)}")
 
-    train_ds = WoundSegmentationDataset(train_samples, image_size=args.image_size, augment=True)
+    train_ds = WoundSegmentationDataset(train_samples, image_size=args.image_size, augment=True,
+                                         zoom_prob=args.zoom_prob)
     val_ds = WoundSegmentationDataset(val_samples, image_size=args.image_size, augment=False)
 
     global LOSS_NAME
     LOSS_NAME = args.loss
-    print(f"Loss: {LOSS_NAME} | oversample_small: {args.oversample_small}")
+    print(f"Loss: {LOSS_NAME} | oversample_small: {args.oversample_small} | zoom_prob: {args.zoom_prob}")
 
     if args.oversample_small:
         weights = small_wound_weights(train_samples)
