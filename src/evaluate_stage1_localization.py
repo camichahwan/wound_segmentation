@@ -98,7 +98,7 @@ def main():
                 contains = bool(gy0 >= y0 and gy1 <= y1 and gx0 >= x0 and gx1 <= x1)
             ratio = area / gt_area if gt_area else np.nan
             rows.append({"checkpoint": label, "image": name, "gt_frac": gt_area / (h * w),
-                         "area_ratio": ratio, "empty": empty, "crop_contains_gt": contains,
+                         "area_ratio": ratio, "s1_empty": empty, "crop_contains_gt": contains,
                          "ok": (not empty) and contains and 0.5 <= ratio <= 2.0})
         if (i + 1) % 20 == 0:
             print(f"  ... {i + 1}/{len(samples)} imagenes procesadas")
@@ -115,8 +115,8 @@ def main():
     print()
     for label, g in df.groupby("checkpoint", sort=False):
         t = g[g.tiny]
-        line = (f"| {label} | {int(g.ok.sum())}/{len(g)} | {int(t.ok.sum())}/{len(t)} | {int(g.empty.sum())} | "
-                f"{int((~g.crop_contains_gt & ~g.empty).sum())} | {g.area_ratio.median():.2f} |")
+        line = (f"| {label} | {int(g.ok.sum())}/{len(g)} | {int(t.ok.sum())}/{len(t)} | {int(g['s1_empty'].sum())} | "
+                f"{int((~g['crop_contains_gt'] & ~g['s1_empty']).sum())} | {g.area_ratio.median():.2f} |")
         lines.append(line)
         print(line)
     report = os.path.join(out_dir, f"stage1_localization_{args.split}.md")
